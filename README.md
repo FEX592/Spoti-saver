@@ -5,18 +5,85 @@ playlists) as MP3s with correct embedded metadata — real title, real
 artist, real cover art — so you never end up with an unlabeled file you
 have to listen to just to identify it.
 
+## Quick start — copy and paste
+
+### Linux, macOS, WSL, or Termux
+
+From the extracted project folder:
+
+```bash
+cd /path/to/spoti-saver
+chmod +x start.sh
+./start.sh --install
+spoti-saver
+```
+
+After installation, `spoti-saver` works from any directory and after
+restarting the terminal or device. To remove the managed command later:
+
+```bash
+cd /path/to/spoti-saver
+./start.sh --uninstall
+```
+
+For macOS/Linux/WSL/Termux, `--install` creates one managed launcher in the
+appropriate executable directory and does not create duplicates. It points to
+this project's absolute `start.sh`, so the project can remain where it is.
+
+### Windows PowerShell
+
+Install Git for Windows or enable WSL first, then run PowerShell from the
+project folder:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+spoti-saver
+```
+
+To remove the Windows command:
+
+```powershell
+.\install.ps1 -Uninstall
+```
+
+The Windows installer creates one managed `%USERPROFILE%\bin\spoti-saver.cmd`
+launcher that invokes this project's `start.sh`.
+
 ## Running it
 
 ```bash
 node index.js
 ```
 
-On first launch, if `yt-dlp`, `ffmpeg`, or `ffprobe` is missing, a platform
-bootstrap wizard appears. It supports Windows, Termux/Android, Linux, WSL,
-and macOS. Linux and WSL installations can select Debian/Ubuntu, Fedora/RHEL,
-Arch, openSUSE, or Alpine when the distribution cannot be detected. The
-wizard uses the native package manager for the selected environment and
-verifies all three commands before the downloader starts.
+The project also includes a lightweight cross-platform launcher:
+
+```bash
+./start.sh
+```
+
+`start.sh` resolves the project directory independently of the current
+working directory, checks for Node.js, installs it when missing, and checks
+for package-manager updates when it is already installed. It supports
+Termux, Linux/WSL (`apt`, `dnf`, `yum`, `pacman`, and `apk`), macOS
+(Homebrew), and Windows shells with `winget` or Chocolatey. It only manages
+Node.js and then launches `index.js`; yt-dlp, FFmpeg, FFprobe, and the
+application dependencies remain handled by the existing application
+bootstrap.
+
+On first setup, a platform bootstrap wizard appears before the downloader.
+It supports Windows, Termux/Android, Linux, WSL, and macOS. The selected
+platform and Linux distribution are saved in `config.json`; later launches
+reuse that target. When a saved target is found, the program asks whether to
+re-run setup or launch normally without reinstalling anything.
+Normal launch still verifies the required tools; if `yt-dlp`, `ffmpeg`, or
+`ffprobe` is missing, setup starts automatically instead of allowing a
+download to fail.
+Linux and WSL installations can select Debian/Ubuntu, Fedora/RHEL, Arch,
+openSUSE, or Alpine. The wizard uses the native package manager for the
+selected environment, force-reinstalls the native tools and Node dependencies,
+prints their resolved paths, and verifies every dependency before the
+downloader starts.
 
 You can also run the installer directly:
 
@@ -30,13 +97,20 @@ For scripts or headless sessions, use automatic detection:
 node bootstrap.js --auto
 ```
 
+To change the saved target later, run:
+
+```bash
+node bootstrap.js --reselect-platform
+```
+
 That starts a long-running session — it doesn't take the link as an
 argument. On start it automatically:
 
 1. Installs its own npm dependencies (`axios`, `node-id3`, `ffmpeg-static`,
    `dotenv`) if `node_modules` isn't there yet.
-2. Runs `bootstrap.js` when `yt-dlp`, `ffmpeg`, or `ffprobe` is missing.
-3. Verifies the selected platform's native installation before continuing.
+2. Runs `bootstrap.js` for the selected platform on every normal startup.
+3. If the target is saved, asks whether to re-run setup or launch normally.
+4. When setup is selected, reinstalls and verifies the selected platform's native tools and all Node dependencies.
 4. Then waits for you to paste links.
 
 From there, paste a track or playlist link and press Enter — it
@@ -149,14 +223,9 @@ overwrite the persistent setting.
 
 ## Linux / Termux
 
-The auto-download in step 2/3 above only works when a standalone glibc
-binary can actually run on your machine. That's true for a normal
-x86_64/arm64 Linux desktop, but **not** for Termux (bionic libc, not
-glibc) — there, install both up front instead of relying on auto-download:
-
-```bash
-pkg install yt-dlp ffmpeg
-```
+The auto-download of standalone Linux binaries is not used on Termux because
+Termux uses bionic libc rather than glibc. The bootstrap installs the native
+Termux packages instead.
 
 The `bin/yt-dlp.exe` file included in Windows copies of this project is not
 usable in Termux. Termux uses the native executables installed by `pkg`.
@@ -164,29 +233,21 @@ The launcher automatically prepends `$PREFIX/bin` to `PATH`, checks for
 `yt-dlp`, `ffmpeg`, and `ffprobe`, and installs any missing packages with
 `pkg` on first launch. It also passes the native FFmpeg directory to yt-dlp,
 so both FFmpeg and FFprobe are discoverable without manual `export` commands.
+It sets `YTDLP_PATH`, `FFMPEG_PATH`, and `FFPROBE_PATH` inside the Node
+process itself; a child script cannot export variables into the parent shell.
 
-The program automatically uses `npm install --ignore-scripts` on Termux so
-the unsupported `ffmpeg-static` installer is not executed. The native Termux
-`ffmpeg` package is used instead. At startup, if `yt-dlp` or `ffmpeg` is
-missing and `pkg` is available, the program installs the missing packages
-automatically. If automatic package installation is unavailable, run the
-command above manually. Do not run a separate plain `npm install` before
-installing the Termux packages, because that will invoke the unsupported
-`ffmpeg-static` installer.
+The program uses `npm install --ignore-scripts` on Termux so the unsupported
+`ffmpeg-static` installer is not executed. The native Termux `ffmpeg` package
+is used instead. Do not run a separate plain `npm install`; start the program
+or run `node bootstrap.js` so the complete setup and path verification run.
 
 Normal Linux x64 and arm64 systems can use the automatic standalone yt-dlp
 download, but installing `yt-dlp` and `ffmpeg` from the system package
 manager is also supported. Windows uses `yt-dlp.exe` and resolves configured
 OneDrive paths normally.
 
-Only if the tools are installed in a nonstandard location, set these optional
-overrides before starting the program:
-
-```bash
-export YTDLP_PATH="$PREFIX/bin/yt-dlp"
-export FFMPEG_PATH="$PREFIX/bin/ffmpeg"
-node index.js
-```
+Only set `YTDLP_PATH`, `FFMPEG_PATH`, or `FFPROBE_PATH` if the tools are in a
+nonstandard location outside `$PREFIX/bin`.
 
 On any headless/SSH/Termux setup with no default browser, the Spotify
 login step now always prints the login URL to the terminal — open it on

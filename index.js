@@ -14,6 +14,12 @@ if (process.env.PREFIX) {
     const termuxBin = path.join(process.env.PREFIX, 'bin');
     const pathParts = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
     if (!pathParts.includes(termuxBin)) process.env.PATH = [termuxBin, ...pathParts].join(path.delimiter);
+    // These are process-local on purpose: a child script cannot export into
+    // the parent Termux shell, but the downloader and every child it starts
+    // can use these absolute paths reliably.
+    process.env.YTDLP_PATH = process.env.YTDLP_PATH || path.join(termuxBin, 'yt-dlp');
+    process.env.FFMPEG_PATH = process.env.FFMPEG_PATH || path.join(termuxBin, 'ffmpeg');
+    process.env.FFPROBE_PATH = process.env.FFPROBE_PATH || path.join(termuxBin, 'ffprobe');
 }
 
 function isTermuxRuntime() {
@@ -37,12 +43,11 @@ function commandAvailable(command) {
 
 function ensurePlatformTools() {
     const missing = ['yt-dlp', 'ffmpeg', 'ffprobe'].filter(command => !commandAvailable(command));
-    if (!missing.length) return;
     const bootstrap = path.join(ROOT, 'bootstrap.js');
     if (!fs.existsSync(bootstrap)) {
         throw new Error(`Missing tools: ${missing.join(', ')}. The project bootstrap.js file is missing.`);
     }
-    console.log(`📦 First-run setup: ${missing.join(', ')} not found.`);
+    console.log(`📦 Complete setup: ${missing.length ? `missing ${missing.join(', ')}` : 'tools already present; reinstalling and verifying all dependencies'}`);
     const args = [bootstrap];
     // Interactive terminals get the platform/distro selection wizard. Piped
     // or headless launches use safe OS/package-manager auto-detection instead.
@@ -302,6 +307,7 @@ async function main() {
     const ffmpegPath = env.resolveFfmpeg();
     console.log(`   yt-dlp: ${ytdlpPath}`);
     console.log(`   ffmpeg: ${ffmpegPath}`);
+    if (process.env.FFPROBE_PATH) console.log(`   ffprobe: ${process.env.FFPROBE_PATH}`);
 
     let baseDir = config.getOutputPath(outDir);
     ensureDir(baseDir);

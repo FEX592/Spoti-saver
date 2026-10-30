@@ -1,3 +1,6 @@
 {
-  "outputPath": "%OneDrive%\\Music"
+  "outputPath": "%OneDrive%\\Music",
+  "installationTarget": {
+    "platform": "windows"
+  }
 }
