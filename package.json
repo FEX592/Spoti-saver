@@ -1,0 +1,23 @@
+{
+  "name": "fex-spotify-saver",
+  "version": "1.0.0",
+  "description": "CLI tool to download Spotify tracks as correctly tagged MP3s — Dev FEX by Aurelith",
+  "main": "index.js",
+  "bin": {
+    "spotify-saver": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Dev FEX by Aurelith",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "node-id3": "^0.2.6",
+    "ffmpeg-static": "^5.2.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
