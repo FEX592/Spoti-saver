@@ -11,7 +11,12 @@ if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
     archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download.' >&2; exit 1; }
     trap 'rm -f "$archive"' EXIT HUP INT TERM
     printf '%s\n' '📥 Downloading Spoti-Saver...'
-    curl -fsSL 'https://github.com/FEX592/spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive" || { printf '%s\n' '❌ Could not download Spoti-Saver.' >&2; exit 1; }
+    if ! curl --fail --location --show-error --progress-bar \
+        --connect-timeout 15 --max-time 180 --retry 2 --retry-all-errors --retry-delay 2 \
+        'https://github.com/FEX592/Spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive"; then
+        printf '%s\n' '❌ Spoti-Saver download failed or timed out after retries. Check your internet connection and try again.' >&2
+        exit 1
+    fi
     mkdir -p "$install_dir" || { printf '%s\n' '❌ Could not create the installation directory.' >&2; exit 1; }
     tar -xzf "$archive" --strip-components=1 -C "$install_dir" || { printf '%s\n' '❌ Could not extract Spoti-Saver.' >&2; exit 1; }
     rm -f "$archive"
