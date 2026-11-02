@@ -21,29 +21,35 @@ if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
         printf '%s\n' "$result" > "$curl_status"
     ) &
     download_pid=$!
+    last_status_time=$start_time
     while [ ! -f "$curl_status" ]; do
         sleep 5
         [ -f "$curl_status" ] && break
         now=$(date +%s)
         elapsed=$((now - start_time))
-        bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
-        megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
-        if [ "$bytes" -gt 0 ]; then
-            printf '📥 Downloading Spoti-Saver: %s MB received (%ss elapsed)\n' "$megabytes" "$elapsed"
-        else
-            printf '⏳ Connecting to GitHub for Spoti-Saver download (%ss elapsed; no data received yet)\n' "$elapsed"
+        if [ -t 1 ] && [ $((now - last_status_time)) -ge 15 ]; then
+            last_status_time=$now
+            bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
+            megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+            if [ "$bytes" -gt 0 ]; then
+                printf '\r\033[K📥 Downloading Spoti-Saver: %s MB received (%ss elapsed)' "$megabytes" "$elapsed"
+            else
+                printf '\r\033[K⏳ Connecting to GitHub (%ss elapsed; no data received yet)' "$elapsed"
+            fi
         fi
     done
     wait "$download_pid" || true
     curl_result=$(cat "$curl_status" 2>/dev/null || printf '1')
     rm -f "$curl_status"
     if [ "$curl_result" != '0' ]; then
+        [ -t 1 ] && printf '\n'
         cat "$curl_log" >&2
         rm -f "$curl_log"
         printf '%s\n' '❌ Spoti-Saver download failed or timed out after retries. Check your internet connection and try again.' >&2
         exit 1
     fi
     rm -f "$curl_log"
+    [ -t 1 ] && printf '\n'
     bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
     megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
     printf '✅ Spoti-Saver download complete (%s MB).\n' "$megabytes"
