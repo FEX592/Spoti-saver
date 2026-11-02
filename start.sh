@@ -10,7 +10,6 @@ if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
     install_dir="${XDG_DATA_HOME:-${HOME:-.}/.local/share}/spoti-saver"
     archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download.' >&2; exit 1; }
     trap 'rm -f "$archive"' EXIT HUP INT TERM
-    printf '%s\n' '📥 Downloading Spoti-Saver...'
     curl_log=$(mktemp "${TMPDIR:-/tmp}/spoti-saver-curl.XXXXXX") || { printf '%s\n' 'Could not create a temporary download log.' >&2; exit 1; }
     curl_status="${archive}.status"
     started_at=$(date +%s)
@@ -58,9 +57,6 @@ if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
     else
         printf 'Download complete: %s MB.\n' "$megabytes"
     fi
-    bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
-    megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
-    printf '✅ Spoti-Saver download complete (%s MB).\n' "$megabytes"
     mkdir -p "$install_dir" || { printf '%s\n' '❌ Could not create the installation directory.' >&2; exit 1; }
     tar -xzf "$archive" --strip-components=1 -C "$install_dir" || { printf '%s\n' '❌ Could not extract Spoti-Saver.' >&2; exit 1; }
     rm -f "$archive"
