@@ -11,11 +11,52 @@ if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
     archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download.' >&2; exit 1; }
     trap 'rm -f "$archive"' EXIT HUP INT TERM
     printf '%s\n' '📥 Downloading Spoti-Saver...'
-    if ! curl --fail --location --show-error --silent \
+    curl_log=$(mktemp "${TMPDIR:-/tmp}/spoti-saver-curl.XXXXXX") || { printf '%s\n' 'Could not create a temporary download log.' >&2; exit 1; }
+    curl_status="${archive}.status"
+    started_at=$(date +%s)
+    last_update=$started_at
+    if [ -t 1 ]; then
+        printf 'Downloading Spoti-Saver | connecting | 00:00'
+    else
+        printf '%s\n' 'Downloading Spoti-Saver...'
+    fi
+    (curl --fail --location --show-error --silent \
         --connect-timeout 15 --max-time 180 --retry 2 --retry-all-errors --retry-delay 2 \
-        'https://github.com/FEX592/Spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive"; then
-        printf '%s\n' '❌ Spoti-Saver download failed or timed out after retries. Check your internet connection and try again.' >&2
+        'https://github.com/FEX592/Spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive" 2>"$curl_log"
+        result=$?
+        printf '%s\n' "$result" > "$curl_status"
+    ) &
+    download_pid=$!
+    while [ ! -f "$curl_status" ]; do
+        sleep 1
+        [ -f "$curl_status" ] && break
+        now=$(date +%s)
+        if [ -t 1 ] && [ $((now - last_update)) -ge 2 ]; then
+            elapsed=$((now - started_at))
+            bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
+            megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+            printf '\r\033[KDownloading Spoti-Saver | %s MB received | %02d:%02d' "$megabytes" "$((elapsed / 60))" "$((elapsed % 60))"
+            last_update=$now
+        fi
+    done
+    wait "$download_pid" || true
+    curl_result=$(cat "$curl_status" 2>/dev/null || printf '1')
+    rm -f "$curl_status"
+    elapsed=$(($(date +%s) - started_at))
+    bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
+    megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+    if [ "$curl_result" != '0' ]; then
+        [ -t 1 ] && printf '\r\033[K'
+        cat "$curl_log" >&2
+        rm -f "$curl_log"
+        printf '%s\n' 'Spoti-Saver download failed or timed out after retries. Check your connection and try again.' >&2
         exit 1
+    fi
+    rm -f "$curl_log"
+    if [ -t 1 ]; then
+        printf '\r\033[KDownload complete | %s MB | %02d:%02d\n' "$megabytes" "$((elapsed / 60))" "$((elapsed % 60))"
+    else
+        printf 'Download complete: %s MB.\n' "$megabytes"
     fi
     bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
     megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
