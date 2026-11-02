@@ -48,11 +48,13 @@ function ensurePlatformTools() {
         throw new Error(`Missing tools: ${missing.join(', ')}. The project bootstrap.js file is missing.`);
     }
     console.log(`📦 Complete setup: ${missing.length ? `missing ${missing.join(', ')}` : 'tools already present; reinstalling and verifying all dependencies'}`);
+    console.log('⏳ Native-tool setup starting. Package-manager progress will appear below.');
     const args = [bootstrap];
     // Interactive terminals get the platform/distro selection wizard. Piped
     // or headless launches use safe OS/package-manager auto-detection instead.
     if (!process.stdin.isTTY || !process.stdout.isTTY) args.push('--auto');
     execSync(`"${process.execPath}" ${args.map(value => `"${value}"`).join(' ')}`, { cwd: ROOT, stdio: 'inherit', shell: true });
+    console.log('✅ Native-tool setup finished.');
 }
 
 // ── Step 1: npm deps ─────────────────────────────────────────────────────
@@ -67,7 +69,9 @@ function ensureNpmDeps() {
         // ffmpeg-static has no Termux/Android binary and its install script
         // aborts npm install. Termux uses the native pkg ffmpeg package.
         const installCommand = isTermuxRuntime() ? 'npm install --ignore-scripts' : 'npm install';
+        console.log(`⏳ Installing missing Node.js packages (${missing.join(', ')}). npm output will appear below.`);
         execSync(installCommand, { cwd: ROOT, stdio: 'inherit' });
+        console.log('✅ Node.js package installation finished.');
     }
 }
 

@@ -47,9 +47,10 @@ function saveInstallTarget(platform, distro) {
     console.log(`\nSaved installation target in ${CONFIG_PATH}: ${platform}${distro ? ` (${distro})` : ''}`);
 }
 function run(command, args) {
-    console.log(`\n$ ${command} ${args.join(' ')}`);
+    console.log(`\n⏳ Setup running: ${command} ${args.join(' ')}`);
     const result = spawnSync(command, args, { stdio: 'inherit', shell: false });
     if (result.error || result.status !== 0) throw result.error || new Error(`${command} exited with code ${result.status}`);
+    console.log(`✅ Setup step complete: ${command}`);
 }
 function sudo(command, args) { return commandExists('sudo') ? run('sudo', [command, ...args]) : run(command, args); }
 function detectLinuxFamily() {
@@ -141,6 +142,7 @@ function installFor(platform, distro) {
 }
 function installNodeDependencies() {
     if (!commandExists('npm')) throw new Error('Node.js/npm is required before setup can continue.');
+    console.log('⏳ Installing Node.js packages with npm. This can take several minutes; npm output will appear below.');
     run('npm', ['install', '--force', '--ignore-scripts', '--no-audit', '--no-fund']);
 }
 function verifyNodeDependencies() {
@@ -192,7 +194,9 @@ async function main() {
     const distro = (platform === 'linux' || platform === 'wsl') ? await chooseLinuxDistro(detectLinuxFamily()) : null;
     saveInstallTarget(platform, distro);
     console.log(`\nInstalling for ${platform}${distro ? ` (${distro})` : ''}...`);
+    console.log('⏳ Installing native download tools (yt-dlp / ffmpeg). Package-manager output will appear below.');
     installFor(platform, distro);
+    console.log('✅ Native tool installation step complete.');
     console.log('\nInstalling/reinstalling Node dependencies...');
     installNodeDependencies();
     console.log('\nResolved Node dependency paths:');
