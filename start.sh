@@ -11,12 +11,42 @@ if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
     archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download.' >&2; exit 1; }
     trap 'rm -f "$archive"' EXIT HUP INT TERM
     printf '%s\n' '📥 Downloading Spoti-Saver...'
-    if ! curl --fail --location --show-error --progress-bar \
+    curl_log=$(mktemp "${TMPDIR:-/tmp}/spoti-saver-curl.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download log.' >&2; exit 1; }
+    curl_status="${archive}.status"
+    start_time=$(date +%s)
+    (curl --fail --location --show-error --silent \
         --connect-timeout 15 --max-time 180 --retry 2 --retry-all-errors --retry-delay 2 \
-        'https://github.com/FEX592/Spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive"; then
+        'https://github.com/FEX592/Spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive" 2>"$curl_log"
+        result=$?
+        printf '%s\n' "$result" > "$curl_status"
+    ) &
+    download_pid=$!
+    while [ ! -f "$curl_status" ]; do
+        sleep 5
+        [ -f "$curl_status" ] && break
+        now=$(date +%s)
+        elapsed=$((now - start_time))
+        bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
+        megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+        if [ "$bytes" -gt 0 ]; then
+            printf '📥 Downloading Spoti-Saver: %s MB received (%ss elapsed)\n' "$megabytes" "$elapsed"
+        else
+            printf '⏳ Connecting to GitHub for Spoti-Saver download (%ss elapsed; no data received yet)\n' "$elapsed"
+        fi
+    done
+    wait "$download_pid" || true
+    curl_result=$(cat "$curl_status" 2>/dev/null || printf '1')
+    rm -f "$curl_status"
+    if [ "$curl_result" != '0' ]; then
+        cat "$curl_log" >&2
+        rm -f "$curl_log"
         printf '%s\n' '❌ Spoti-Saver download failed or timed out after retries. Check your internet connection and try again.' >&2
         exit 1
     fi
+    rm -f "$curl_log"
+    bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
+    megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+    printf '✅ Spoti-Saver download complete (%s MB).\n' "$megabytes"
     mkdir -p "$install_dir" || { printf '%s\n' '❌ Could not create the installation directory.' >&2; exit 1; }
     tar -xzf "$archive" --strip-components=1 -C "$install_dir" || { printf '%s\n' '❌ Could not extract Spoti-Saver.' >&2; exit 1; }
     rm -f "$archive"
