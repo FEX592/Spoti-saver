@@ -3,6 +3,23 @@
 # setup to index.js. It is intentionally POSIX-sh compatible.
 set -u
 
+# A curl-piped invocation has no project directory; bootstrap a persistent copy.
+if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
+    command -v curl >/dev/null 2>&1 || { printf '%s\n' '❌ curl is required for direct installation.' >&2; exit 1; }
+    command -v tar >/dev/null 2>&1 || { printf '%s\n' '❌ tar is required for direct installation.' >&2; exit 1; }
+    install_dir="${XDG_DATA_HOME:-${HOME:-.}/.local/share}/spoti-saver"
+    archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download.' >&2; exit 1; }
+    trap 'rm -f "$archive"' EXIT HUP INT TERM
+    printf '%s\n' '📥 Downloading Spoti-Saver...'
+    curl -fsSL 'https://github.com/FEX592/spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive" || { printf '%s\n' '❌ Could not download Spoti-Saver.' >&2; exit 1; }
+    mkdir -p "$install_dir" || { printf '%s\n' '❌ Could not create the installation directory.' >&2; exit 1; }
+    tar -xzf "$archive" --strip-components=1 -C "$install_dir" || { printf '%s\n' '❌ Could not extract Spoti-Saver.' >&2; exit 1; }
+    rm -f "$archive"
+    trap - EXIT HUP INT TERM
+    /bin/sh "$install_dir/start.sh" --install || exit 1
+    exec /bin/sh "$install_dir/start.sh" "$@"
+fi
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P) || {
     printf '%s\n' '❌ Could not resolve the Spoti-Saver project directory.' >&2
     exit 1
