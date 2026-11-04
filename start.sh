@@ -36,22 +36,19 @@ run_status() {
         status_label_limit=$((status_cols - status_fixed))
         [ "$status_label_limit" -gt 0 ] || status_label_limit=1
         status_display_label=$(printf '%s' "$status_label" | cut -c "1-$status_label_limit")
-        while kill -0 "$status_pid" 2>/dev/null; do
-            status_elapsed=$(($(date +%s) - status_started))
-            if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-                status_write '\r\033[2K\033[36m%s\033[0m | 0%% | \033[2m%02d:%02d time elapsed\033[0m' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
-            else status_write '\r\033[2K%s | 0%% | %02d:%02d time elapsed' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
-            sleep 1
-        done
+        if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+            status_write '\r\033[2K\033[36m%s\033[0m | 0%% | \033[2m00:00 time elapsed\033[0m' "$status_display_label"
+        else status_write '\r\033[2K%s | 0%% | 00:00 time elapsed' "$status_display_label"; fi
     fi
     wait "$status_pid"; status_result=$?
     status_elapsed=$(($(date +%s) - status_started))
-    if [ "$status_target" != none ] && [ "$status_result" -eq 0 ]; then
-        if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-            status_write '\r\033[2K\033[36m%s\033[0m | \033[32m100%%\033[0m | \033[2m%02d:%02d time elapsed\033[0m\n' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
-        else status_write '\r\033[2K%s | 100%% | %02d:%02d time elapsed\n' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
-    elif [ "$status_target" != none ]; then status_write '\r\033[2K'
-    elif [ "$status_result" -eq 0 ]; then success "$status_label | 100% | $(printf '%02d:%02d' "$((status_elapsed / 60))" "$((status_elapsed % 60))") time elapsed"; fi
+    if [ "$status_result" -eq 0 ]; then
+        if [ "$status_target" != none ]; then
+            if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+                status_write '\r\033[2K\033[36m%s\033[0m | \033[32m100%%\033[0m | \033[2m%02d:%02d time elapsed\033[0m\n' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+            else status_write '\r\033[2K%s | 100%% | %02d:%02d time elapsed\n' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
+        else success "$status_label | 100% | $(printf '%02d:%02d' "$((status_elapsed / 60))" "$((status_elapsed % 60))") time elapsed"; fi
+    elif [ "$status_target" != none ]; then status_write '\r\033[2K'; fi
     if [ "$status_result" -ne 0 ]; then cat "$status_log" >&2; return "$status_result"; fi
 }
 is_termux() { [ -n "${TERMUX_VERSION:-}" ] || case "${PREFIX:-}" in *com.termux*|/data/data/com.termux/*) return 0;; *) return 1;; esac; }
