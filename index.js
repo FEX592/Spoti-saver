@@ -82,13 +82,7 @@ function runQuietly(command, options = {}, label = 'Working') {
         child.on('close', code => {
             if (timer) clearInterval(timer);
             if (interactive) process.stdout.write('\r\x1b[K');
-            if (code === 0) {
-                const seconds = Math.floor((Date.now() - startedAt) / 1000);
-                const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')} time elapsed`;
-                if (interactive) process.stdout.write(`\r\x1b[K${paint(label, 36)} | ${paint('100%', 32)} | ${paint(elapsed, 2)}\n`);
-                else console.log(`${label} | 100% | ${elapsed}`);
-                return resolve();
-            }
+            if (code === 0) return resolve();
             const output = [stdout, stderr].filter(Boolean).map(value => value.toString().trim()).filter(Boolean).join('\n');
             if (output) console.error(output);
             reject(new Error(`Setup command failed${code == null ? '' : ` (exit ${code})`}.`));
@@ -131,14 +125,8 @@ async function withStatus(label, operation) {
     const render = () => process.stdout.write(`\r\x1b[K${paint(label, 36)} | 0% | ${paint(`${elapsedClock(startedAt)} time elapsed`, 2)}`);
     render();
     const timer = setInterval(render, 1000);
-    try {
-        const result = await operation();
-        process.stdout.write(`\r\x1b[K${paint(label, 36)} | ${paint('100%', 32)} | ${paint(`${elapsedClock(startedAt)} time elapsed`, 2)}\n`);
-        return result;
-    } catch (error) {
-        process.stdout.write('\r\x1b[K');
-        throw error;
-    } finally { clearInterval(timer); }
+    try { return await operation(); }
+    finally { clearInterval(timer); process.stdout.write('\r\x1b[K'); }
 }
 
 const MAX_RETRIES = 3;

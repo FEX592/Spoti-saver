@@ -34,14 +34,7 @@ run_status() {
         log "$status_label | 0%..."
     fi
     wait "$status_pid"; status_result=$?
-    status_elapsed=$(($(date +%s) - status_started))
-    if [ "$status_result" -eq 0 ]; then
-        if [ ! -t 1 ]; then
-            log "$status_label | 100% | $(printf '%02d:%02d' "$((status_elapsed / 60))" "$((status_elapsed % 60))") time elapsed"
-        elif [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-            printf '\r\033[K\033[36m%s\033[0m | \033[32m100%%\033[0m | \033[2m%02d:%02d time elapsed\033[0m\n' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
-        else printf '\r\033[K%s | 100%% | %02d:%02d time elapsed\n' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
-    elif [ -t 1 ]; then printf '\r\033[K'; fi
+    if [ -t 1 ]; then printf '\r\033[K'; fi
     if [ "$status_result" -ne 0 ]; then cat "$status_log" >&2; return "$status_result"; fi
 }
 is_termux() { [ -n "${TERMUX_VERSION:-}" ] || case "${PREFIX:-}" in *com.termux*|/data/data/com.termux/*) return 0;; *) return 1;; esac; }
