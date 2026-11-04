@@ -30,17 +30,27 @@ run_status() {
     elif [ -t 1 ]; then status_target=stdout
     else status_target=none; fi
     if [ "$status_target" != none ]; then
+        status_cols=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
+        case "$status_cols" in ''|*[!0-9]*) status_cols=${COLUMNS:-80};; esac
+        status_fixed=$(printf '%s' ' | 100% | 00:00 time elapsed' | wc -c | tr -d '[:space:]')
+        status_label_limit=$((status_cols - status_fixed))
+        [ "$status_label_limit" -gt 0 ] || status_label_limit=1
+        status_display_label=$(printf '%s' "$status_label" | cut -c "1-$status_label_limit")
         while kill -0 "$status_pid" 2>/dev/null; do
             status_elapsed=$(($(date +%s) - status_started))
             if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-                status_write '\r\033[2K\033[36m%s\033[0m | 0%% | \033[2m%02d:%02d time elapsed\033[0m' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
-            else status_write '\r\033[2K%s | 0%% | %02d:%02d time elapsed' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
+                status_write '\r\033[2K\033[36m%s\033[0m | 0%% | \033[2m%02d:%02d time elapsed\033[0m' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+            else status_write '\r\033[2K%s | 0%% | %02d:%02d time elapsed' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
             sleep 1
         done
     fi
     wait "$status_pid"; status_result=$?
     status_elapsed=$(($(date +%s) - status_started))
-    if [ "$status_target" != none ]; then status_write '\r\033[2K'
+    if [ "$status_target" != none ] && [ "$status_result" -eq 0 ]; then
+        if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+            status_write '\r\033[2K\033[36m%s\033[0m | \033[32m100%%\033[0m | \033[2m%02d:%02d time elapsed\033[0m\n' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+        else status_write '\r\033[2K%s | 100%% | %02d:%02d time elapsed\n' "$status_display_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
+    elif [ "$status_target" != none ]; then status_write '\r\033[2K'
     elif [ "$status_result" -eq 0 ]; then success "$status_label | 100% | $(printf '%02d:%02d' "$((status_elapsed / 60))" "$((status_elapsed % 60))") time elapsed"; fi
     if [ "$status_result" -ne 0 ]; then cat "$status_log" >&2; return "$status_result"; fi
 }
