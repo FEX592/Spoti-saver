@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 
 const ROOT = __dirname;
 
@@ -41,7 +41,7 @@ function commandAvailable(command) {
     }
 }
 
-function ensurePlatformTools() {
+async function ensurePlatformTools() {
     const missing = ['yt-dlp', 'ffmpeg', 'ffprobe'].filter(command => !commandAvailable(command));
     const bootstrap = path.join(ROOT, 'bootstrap.js');
     if (!fs.existsSync(bootstrap)) {
@@ -51,17 +51,39 @@ function ensurePlatformTools() {
     // Interactive terminals get the platform/distro selection wizard. Piped
     // or headless launches use safe OS/package-manager auto-detection instead.
     if (!process.stdin.isTTY || !process.stdout.isTTY) args.push('--auto');
-    runQuietly(`"${process.execPath}" ${args.map(value => `"${value}"`).join(' ')}`, { cwd: ROOT, shell: true });
+    await runQuietly(`"${process.execPath}" ${args.map(value => `"${value}"`).join(' ')}`, { cwd: ROOT }, 'Checking yt-dlp and FFmpeg');
 }
 
-function runQuietly(command, options = {}) {
-    try {
-        execSync(command, { ...options, stdio: 'pipe' });
-    } catch (error) {
-        const output = [error.stdout, error.stderr].filter(Boolean).map(value => value.toString().trim()).filter(Boolean).join('\n');
-        if (output) console.error(output);
-        throw new Error(`Setup command failed${error.status == null ? '' : ` (exit ${error.status})`}.`);
-    }
+function runQuietly(command, options = {}, label = 'Working') {
+    return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
+        const child = spawn(command, [], { ...options, shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let stderr = '';
+        const interactive = !!process.stdout.isTTY;
+        const render = () => {
+            if (!interactive) return;
+            const seconds = Math.floor((Date.now() - startedAt) / 1000);
+            process.stdout.write(`\r\x1b[K${label} | elapsed ${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`);
+        };
+        if (interactive) render(); else console.log(`${label}...`);
+        const timer = interactive ? setInterval(render, 1000) : null;
+        child.stdout.on('data', data => { stdout += data; });
+        child.stderr.on('data', data => { stderr += data; });
+        child.on('error', error => {
+            if (timer) clearInterval(timer);
+            if (interactive) process.stdout.write('\r\x1b[K');
+            reject(error);
+        });
+        child.on('close', code => {
+            if (timer) clearInterval(timer);
+            if (interactive) process.stdout.write('\r\x1b[K');
+            if (code === 0) return resolve();
+            const output = [stdout, stderr].filter(Boolean).map(value => value.toString().trim()).filter(Boolean).join('\n');
+            if (output) console.error(output);
+            reject(new Error(`Setup command failed${code == null ? '' : ` (exit ${code})`}.`));
+        });
+    });
 }
 
 // ── Step 1: npm deps ─────────────────────────────────────────────────────
@@ -69,34 +91,38 @@ function runQuietly(command, options = {}) {
 // only), because spotifyApi.js/tagger.js need axios/node-id3 at their own
 // top level — if we required them before this check, a fresh clone would
 // crash on MODULE_NOT_FOUND before ever getting a chance to self-heal.
-function ensureNpmDeps() {
+async function ensureNpmDeps() {
     const required = ['axios', 'node-id3', 'ffmpeg-static', 'dotenv'];
     const missing = required.filter(pkg => !fs.existsSync(path.join(ROOT, 'node_modules', pkg)));
     if (missing.length) {
         // ffmpeg-static has no Termux/Android binary and its install script
         // aborts npm install. Termux uses the native pkg ffmpeg package.
         const installCommand = isTermuxRuntime() ? 'npm install --ignore-scripts --silent --no-audit --no-fund' : 'npm install --silent --no-audit --no-fund';
-        runQuietly(installCommand, { cwd: ROOT });
+        await runQuietly(installCommand, { cwd: ROOT }, 'Installing Node.js packages');
     }
 }
-
-ensureNpmDeps();
-ensurePlatformTools();
-
-// Safe now — node_modules is guaranteed to exist.
-require('dotenv').config({ path: path.join(ROOT, '.env') });
-const spotify = require('./lib/spotifyApi');
-const youtube = require('./lib/youtube');
-const env = require('./lib/environment');
-const config = require('./lib/config');
-const { tagFile } = require('./lib/tagger');
-const {
-    sanitizeFilename, ensureDir,
-    formatDuration,
-} = require('./lib/utils');
+let spotify, youtube, env, config, tagFile, sanitizeFilename, ensureDir, formatDuration;
 
 function clearTerminal() {
     if (process.stdout.isTTY) console.clear();
+}
+
+function elapsedClock(startedAt) {
+    const seconds = Math.floor((Date.now() - startedAt) / 1000);
+    return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+async function withStatus(label, operation) {
+    if (!process.stdout.isTTY) {
+        console.log(`${label}...`);
+        return operation();
+    }
+    const startedAt = Date.now();
+    const render = () => process.stdout.write(`\r\x1b[K${label} | elapsed ${elapsedClock(startedAt)}`);
+    render();
+    const timer = setInterval(render, 1000);
+    try { return await operation(); }
+    finally { clearInterval(timer); process.stdout.write('\r\x1b[K'); }
 }
 
 const MAX_RETRIES = 3;
@@ -129,7 +155,7 @@ async function withRetries(operation, label) {
         } catch (err) {
             if (!isRetryableError(err) || retry >= MAX_RETRIES) throw err;
             const waitMs = Math.min(1000 * 2 ** retry, 8000);
-            await new Promise(resolve => setTimeout(resolve, waitMs));
+            await withStatus(`Retrying ${label}`, () => new Promise(resolve => setTimeout(resolve, waitMs)));
         }
     }
 }
@@ -199,7 +225,7 @@ async function downloadSingleTrack(ytdlpPath, ffmpegPath, meta, destFolder) {
         'YouTube search'
     );
     await withRetries(
-        () => youtube.downloadAudio(ytdlpPath, ffmpegPath, match.webpage_url || match.url, outputPathNoExt),
+        () => youtube.downloadAudio(ytdlpPath, ffmpegPath, match.webpage_url || match.url, outputPathNoExt, meta.title),
         'Audio download'
     );
 
@@ -212,11 +238,11 @@ async function downloadSingleTrack(ytdlpPath, ffmpegPath, meta, destFolder) {
 async function downloadCollection(resolved, ytdlpPath, ffmpegPath, baseDir) {
     let collection;
     try {
-        collection = await withRetries(() => {
+        collection = await withStatus('Looking up Spotify collection', () => withRetries(() => {
             if (resolved.type === 'artist') return spotify.getArtist(resolved.id);
             if (resolved.type === 'album') return spotify.getAlbum(resolved.id);
             return spotify.getPlaylist(resolved.id);
-        }, 'Spotify collection lookup');
+        }, 'Spotify collection lookup'));
     } catch (err) {
         console.error('❌ Could not resolve playlist:', err.message, '\n');
         return;
@@ -252,7 +278,7 @@ async function downloadCollection(resolved, ytdlpPath, ffmpegPath, baseDir) {
 async function downloadTrack(link, ytdlpPath, ffmpegPath, baseDir) {
     let meta;
     try {
-        meta = await withRetries(() => spotify.getTrackMetadata(link), 'Spotify track lookup');
+        meta = await withStatus('Looking up Spotify track', () => withRetries(() => spotify.getTrackMetadata(link), 'Spotify track lookup'));
     } catch (err) {
         console.error('❌ Could not resolve track metadata:', err.message, '\n');
         return;
@@ -302,8 +328,10 @@ async function main() {
         return;
     }
 
-    const ytdlpPath = await env.resolveYtDlp();
-    const ffmpegPath = env.resolveFfmpeg();
+    const { ytdlpPath, ffmpegPath } = await withStatus('Checking yt-dlp and FFmpeg', async () => ({
+        ytdlpPath: await env.resolveYtDlp(),
+        ffmpegPath: env.resolveFfmpeg(),
+    }));
 
     let baseDir = config.getOutputPath(outDir);
     ensureDir(baseDir);
@@ -324,7 +352,6 @@ async function main() {
         draining = true;
         while (queue.length) {
             const link = queue.shift();
-            clearTerminal();
             await processLink(link, ytdlpPath, ffmpegPath, baseDir);
         }
         draining = false;
@@ -365,7 +392,21 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-main().catch(err => {
+async function initialize() {
+    await ensureNpmDeps();
+    await ensurePlatformTools();
+    // Load app modules only after their npm dependencies have been verified.
+    require('dotenv').config({ path: path.join(ROOT, '.env') });
+    spotify = require('./lib/spotifyApi');
+    youtube = require('./lib/youtube');
+    env = require('./lib/environment');
+    config = require('./lib/config');
+    ({ tagFile } = require('./lib/tagger'));
+    ({ sanitizeFilename, ensureDir, formatDuration } = require('./lib/utils'));
+    await main();
+}
+
+initialize().catch(err => {
     console.error('❌ Unexpected error:', err.message);
     process.exit(1);
 });
