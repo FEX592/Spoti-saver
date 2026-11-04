@@ -26,15 +26,22 @@ run_status() {
         while kill -0 "$status_pid" 2>/dev/null; do
             status_elapsed=$(($(date +%s) - status_started))
             if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-                printf '\r\033[K\033[36m%s\033[0m | \033[2melapsed %02d:%02d\033[0m' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
-            else printf '\r\033[K%s | elapsed %02d:%02d' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
+                printf '\r\033[K\033[36m%s\033[0m | 0%% | \033[2m%02d:%02d time elapsed\033[0m' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+            else printf '\r\033[K%s | 0%% | %02d:%02d time elapsed' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
             sleep 1
         done
     else
-        log "$status_label..."
+        log "$status_label | 0%..."
     fi
     wait "$status_pid"; status_result=$?
-    if [ -t 1 ]; then printf '\r\033[K'; fi
+    status_elapsed=$(($(date +%s) - status_started))
+    if [ "$status_result" -eq 0 ]; then
+        if [ ! -t 1 ]; then
+            log "$status_label | 100% | $(printf '%02d:%02d' "$((status_elapsed / 60))" "$((status_elapsed % 60))") time elapsed"
+        elif [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+            printf '\r\033[K\033[36m%s\033[0m | \033[32m100%%\033[0m | \033[2m%02d:%02d time elapsed\033[0m\n' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+        else printf '\r\033[K%s | 100%% | %02d:%02d time elapsed\n' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
+    elif [ -t 1 ]; then printf '\r\033[K'; fi
     if [ "$status_result" -ne 0 ]; then cat "$status_log" >&2; return "$status_result"; fi
 }
 is_termux() { [ -n "${TERMUX_VERSION:-}" ] || case "${PREFIX:-}" in *com.termux*|/data/data/com.termux/*) return 0;; *) return 1;; esac; }
