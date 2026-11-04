@@ -47,14 +47,21 @@ function ensurePlatformTools() {
     if (!fs.existsSync(bootstrap)) {
         throw new Error(`Missing tools: ${missing.join(', ')}. The project bootstrap.js file is missing.`);
     }
-    console.log(`📦 Complete setup: ${missing.length ? `missing ${missing.join(', ')}` : 'tools already present; reinstalling and verifying all dependencies'}`);
-    console.log('⏳ Native-tool setup starting. Package-manager progress will appear below.');
     const args = [bootstrap];
     // Interactive terminals get the platform/distro selection wizard. Piped
     // or headless launches use safe OS/package-manager auto-detection instead.
     if (!process.stdin.isTTY || !process.stdout.isTTY) args.push('--auto');
-    execSync(`"${process.execPath}" ${args.map(value => `"${value}"`).join(' ')}`, { cwd: ROOT, stdio: 'inherit', shell: true });
-    console.log('✅ Native-tool setup finished.');
+    runQuietly(`"${process.execPath}" ${args.map(value => `"${value}"`).join(' ')}`, { cwd: ROOT, shell: true });
+}
+
+function runQuietly(command, options = {}) {
+    try {
+        execSync(command, { ...options, stdio: 'pipe' });
+    } catch (error) {
+        const output = [error.stdout, error.stderr].filter(Boolean).map(value => value.toString().trim()).filter(Boolean).join('\n');
+        if (output) console.error(output);
+        throw new Error(`Setup command failed${error.status == null ? '' : ` (exit ${error.status})`}.`);
+    }
 }
 
 // ── Step 1: npm deps ─────────────────────────────────────────────────────
@@ -68,10 +75,8 @@ function ensureNpmDeps() {
     if (missing.length) {
         // ffmpeg-static has no Termux/Android binary and its install script
         // aborts npm install. Termux uses the native pkg ffmpeg package.
-        const installCommand = isTermuxRuntime() ? 'npm install --ignore-scripts' : 'npm install';
-        console.log(`⏳ Installing missing Node.js packages (${missing.join(', ')}). npm output will appear below.`);
-        execSync(installCommand, { cwd: ROOT, stdio: 'inherit' });
-        console.log('✅ Node.js package installation finished.');
+        const installCommand = isTermuxRuntime() ? 'npm install --ignore-scripts --silent --no-audit --no-fund' : 'npm install --silent --no-audit --no-fund';
+        runQuietly(installCommand, { cwd: ROOT });
     }
 }
 
@@ -124,7 +129,6 @@ async function withRetries(operation, label) {
         } catch (err) {
             if (!isRetryableError(err) || retry >= MAX_RETRIES) throw err;
             const waitMs = Math.min(1000 * 2 ** retry, 8000);
-            console.error(`   ⚠️ ${label} failed (${err.message}); retry ${retry + 1}/${MAX_RETRIES} in ${waitMs / 1000}s...`);
             await new Promise(resolve => setTimeout(resolve, waitMs));
         }
     }
@@ -187,26 +191,21 @@ async function downloadSingleTrack(ytdlpPath, ffmpegPath, meta, destFolder) {
     const finalPath = `${outputPathNoExt}.mp3`;
 
     if (fs.existsSync(finalPath)) {
-        console.log(`⏭  Skipping (already exists): ${filenameBase}.mp3`);
         return finalPath;
     }
 
-    console.log(`\n🔎 ${meta.title} — ${meta.artist}${meta.durationMs ? ' (' + formatDuration(meta.durationMs) + ')' : ''}`);
     const match = await withRetries(
         () => youtube.findBestMatch(ytdlpPath, meta.title, meta.artist, meta.durationMs),
         'YouTube search'
     );
-    console.log(`   ↳ matched: ${match.title || match.webpage_url}${match.duration ? ' (' + formatDuration(match.duration * 1000) + ')' : ''}`);
-    console.log('   ⬇️  downloading...');
     await withRetries(
         () => youtube.downloadAudio(ytdlpPath, ffmpegPath, match.webpage_url || match.url, outputPathNoExt),
         'Audio download'
     );
 
-    console.log('   🏷️  writing metadata...');
     await tagFile(finalPath, meta);
 
-    console.log(`   ✅ saved: ${filenameBase}.mp3`);
+    console.log(`Saved: ${filenameBase}.mp3`);
     return finalPath;
 }
 
@@ -232,12 +231,10 @@ async function downloadCollection(resolved, ytdlpPath, ffmpegPath, baseDir) {
     const collectionFolder = ensureDir(path.join(baseDir, sanitizeFilename(collection.name)));
     const collectionLabel = resolved.type[0].toUpperCase() + resolved.type.slice(1);
     console.log(`\n📀 ${collectionLabel}: ${collection.name} — ${collection.tracks.length} tracks`);
-    console.log(`📁 Saving to: ${collectionFolder}\n`);
     const total = collection.tracks.length;
     const failures = [];
     for (let i = 0; i < total; i++) {
         const meta = collection.tracks[i];
-        console.log(`[${i + 1}/${total}]`);
         try {
             await downloadSingleTrack(ytdlpPath, ffmpegPath, meta, collectionFolder);
         } catch (err) {
@@ -267,7 +264,6 @@ async function downloadTrack(link, ytdlpPath, ffmpegPath, baseDir) {
         console.error('❌ Download failed:', err.message, '\n');
         return;
     }
-    console.log('🎉 Done.\n');
 }
 
 // One link in, fully handled, errors logged and swallowed here — a bad
@@ -306,19 +302,13 @@ async function main() {
         return;
     }
 
-    console.log('🔧 Checking yt-dlp / ffmpeg...');
     const ytdlpPath = await env.resolveYtDlp();
     const ffmpegPath = env.resolveFfmpeg();
-    console.log(`   yt-dlp: ${ytdlpPath}`);
-    console.log(`   ffmpeg: ${ffmpegPath}`);
-    if (process.env.FFPROBE_PATH) console.log(`   ffprobe: ${process.env.FFPROBE_PATH}`);
 
     let baseDir = config.getOutputPath(outDir);
     ensureDir(baseDir);
 
-    console.log(`\n✅ Ready — saving to: ${baseDir}`);
-    console.log('Paste a Spotify track or playlist link and press Enter.');
-    console.log("Multiple links queue up and download one after another in order. Type 'exit' (or Ctrl+C) to stop.\n");
+    console.log(`Ready — saving to ${baseDir}. Paste a Spotify link, or type 'exit' to stop.`);
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
 

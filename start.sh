@@ -69,12 +69,18 @@ remove_launcher() {
 setup_app() {
     [ -f "$INSTALL_DIR/index.js" ] || fetch_latest || return 1
     ensure_node || return 1
+    setup_log=$(mktemp "${TMPDIR:-/tmp}/spoti-saver-setup.XXXXXX") || return 1
     if is_termux; then
-        command_exists pkg || { fail 'Termux pkg was not found.'; return 1; }
-        pkg install -y python ffmpeg || return 1
-        (cd "$INSTALL_DIR" && npm install --ignore-scripts) || return 1
-    else (cd "$INSTALL_DIR" && npm install) || return 1; fi
-    node "$INSTALL_DIR/bootstrap.js" --auto || return 1
+        command_exists pkg || { rm -f "$setup_log"; fail 'Termux pkg was not found.'; return 1; }
+        (pkg install -y python ffmpeg && cd "$INSTALL_DIR" && npm install --ignore-scripts --silent --no-audit --no-fund && node "$INSTALL_DIR/bootstrap.js" --auto) >"$setup_log" 2>&1 || {
+            cat "$setup_log" >&2; rm -f "$setup_log"; fail 'Setup failed; see the output above.'; return 1;
+        }
+    else
+        (cd "$INSTALL_DIR" && npm install --silent --no-audit --no-fund && node "$INSTALL_DIR/bootstrap.js" --auto) >"$setup_log" 2>&1 || {
+            cat "$setup_log" >&2; rm -f "$setup_log"; fail 'Setup failed; see the output above.'; return 1;
+        }
+    fi
+    rm -f "$setup_log"
     write_launcher "$(launcher_path)" || return 1
     log 'Installed/repaired successfully. Run: spoti-saver'
 }
