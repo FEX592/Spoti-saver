@@ -18,12 +18,13 @@ chmod +x start.sh
 spoti-saver
 ```
 
-The menu offers Install, Uninstall, Repair, and Update. It is also safe to run
-the installer directly from a terminal without cloning the repository:
-
+To start the installer directly from a terminal without cloning the
+repository, run:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FEX592/spoti-saver/main/start.sh | bash
 ```
+Choose **1) Install** in the menu to install Spoti-Saver and its `spoti-saver`
+startup command. The menu also offers Uninstall, Repair, and Update.
 
 The menu reads from the terminal even though the script itself comes through a
 curl pipe. After installation, `spoti-saver` works from any directory. The
