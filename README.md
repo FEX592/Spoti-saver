@@ -9,17 +9,25 @@ have to listen to just to identify it.
 
 ### Linux, macOS, WSL, or Termux
 
-From the extracted project folder:
+Run the installer menu from the extracted project folder:
 
 ```bash
 cd /path/to/spoti-saver
 chmod +x start.sh
-./start.sh --install
+./start.sh
 spoti-saver
 ```
 
-After installation, `spoti-saver` works from any directory and after
-restarting the terminal or device. To remove the managed command later:
+The menu offers Install, Uninstall, Repair, and Update. It is also safe to run
+the installer directly from a terminal without cloning the repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FEX592/spoti-saver/main/start.sh | bash
+```
+
+The menu reads from the terminal even though the script itself comes through a
+curl pipe. After installation, `spoti-saver` works from any directory. The
+managed launcher can also be removed from the menu or with:
 
 ```bash
 cd /path/to/spoti-saver
@@ -62,14 +70,11 @@ The project also includes a lightweight cross-platform launcher:
 ./start.sh
 ```
 
-`start.sh` resolves the project directory independently of the current
-working directory, checks for Node.js, installs it when missing, and checks
-for package-manager updates when it is already installed. It supports
-Termux, Linux/WSL (`apt`, `dnf`, `yum`, `pacman`, and `apk`), macOS
-(Homebrew), and Windows shells with `winget` or Chocolatey. It only manages
-Node.js and then launches `index.js`; yt-dlp, FFmpeg, FFprobe, and the
-application dependencies remain handled by the existing application
-bootstrap.
+The installer supports Termux, Linux/WSL (`apt`, `dnf`, `yum`, `pacman`, and
+`apk`), and macOS (Homebrew); the Windows PowerShell installer is described
+above. Install, Repair, and Update check Node.js/npm, install application
+dependencies and run the platform bootstrap. Updates replace app files without
+deleting the saved configuration or downloaded files outside the app folder.
 
 On first setup, a platform bootstrap wizard appears before the downloader.
 It supports Windows, Termux/Android, Linux, WSL, and macOS. The selected

@@ -1,329 +1,124 @@
 #!/bin/sh
-# Spoti-Saver launcher: manages Node.js only, then delegates all application
-# setup to index.js. It is intentionally POSIX-sh compatible.
+# Spoti-Saver installer and launcher. Menu input comes from the controlling
+# terminal so curl-piped installs never try to read choices from the curl pipe.
 set -u
-
-# A curl-piped invocation has no project directory; bootstrap a persistent copy.
-if [ ! -f "$(dirname -- "$0")/index.js" ] && [ "${BASH_VERSION:-}" != "" ]; then
-    command -v curl >/dev/null 2>&1 || { printf '%s\n' '❌ curl is required for direct installation.' >&2; exit 1; }
-    command -v tar >/dev/null 2>&1 || { printf '%s\n' '❌ tar is required for direct installation.' >&2; exit 1; }
-    install_dir="${XDG_DATA_HOME:-${HOME:-.}/.local/share}/spoti-saver"
-    archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || { printf '%s\n' '❌ Could not create a temporary download.' >&2; exit 1; }
-    trap 'rm -f "$archive"' EXIT HUP INT TERM
-    curl_log=$(mktemp "${TMPDIR:-/tmp}/spoti-saver-curl.XXXXXX") || { printf '%s\n' 'Could not create a temporary download log.' >&2; exit 1; }
-    curl_status="${archive}.status"
-    started_at=$(date +%s)
-    last_update=$started_at
-    if [ -t 1 ]; then
-        printf 'Downloading Spoti-Saver | connecting | 00:00'
-    else
-        printf '%s\n' 'Downloading Spoti-Saver...'
-    fi
-    (curl --fail --location --show-error --silent \
-        --connect-timeout 15 --max-time 180 --retry 2 --retry-all-errors --retry-delay 2 \
-        'https://github.com/FEX592/Spoti-saver/archive/refs/heads/main.tar.gz' -o "$archive" 2>"$curl_log"
-        result=$?
-        printf '%s\n' "$result" > "$curl_status"
-    ) &
-    download_pid=$!
-    while [ ! -f "$curl_status" ]; do
-        sleep 1
-        [ -f "$curl_status" ] && break
-        now=$(date +%s)
-        if [ -t 1 ] && [ $((now - last_update)) -ge 2 ]; then
-            elapsed=$((now - started_at))
-            bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
-            megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
-            printf '\r\033[KDownloading Spoti-Saver | %s MB received | %02d:%02d' "$megabytes" "$((elapsed / 60))" "$((elapsed % 60))"
-            last_update=$now
-        fi
-    done
-    wait "$download_pid" || true
-    curl_result=$(cat "$curl_status" 2>/dev/null || printf '1')
-    rm -f "$curl_status"
-    elapsed=$(($(date +%s) - started_at))
-    bytes=$(wc -c < "$archive" 2>/dev/null || printf '0')
-    megabytes=$(awk -v bytes="$bytes" 'BEGIN { printf "%.1f", bytes / 1048576 }')
-    if [ "$curl_result" != '0' ]; then
-        [ -t 1 ] && printf '\r\033[K'
-        cat "$curl_log" >&2
-        rm -f "$curl_log"
-        printf '%s\n' 'Spoti-Saver download failed or timed out after retries. Check your connection and try again.' >&2
-        exit 1
-    fi
-    rm -f "$curl_log"
-    if [ -t 1 ]; then
-        printf '\r\033[KDownload complete | %s MB | %02d:%02d\n' "$megabytes" "$((elapsed / 60))" "$((elapsed % 60))"
-    else
-        printf 'Download complete: %s MB.\n' "$megabytes"
-    fi
-    mkdir -p "$install_dir" || { printf '%s\n' '❌ Could not create the installation directory.' >&2; exit 1; }
-    tar -xzf "$archive" --strip-components=1 -C "$install_dir" || { printf '%s\n' '❌ Could not extract Spoti-Saver.' >&2; exit 1; }
-    rm -f "$archive"
-    trap - EXIT HUP INT TERM
-    /bin/sh "$install_dir/start.sh" --install || exit 1
-    exec /bin/sh "$install_dir/start.sh" "$@"
-fi
-
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P) || {
-    printf '%s\n' '❌ Could not resolve the Spoti-Saver project directory.' >&2
-    exit 1
-}
-
-APP_ENTRY="$SCRIPT_DIR/index.js"
-
-log() { printf '%s\n' "$*"; }
-fail() { printf '%s\n' "❌ $*" >&2; exit 1; }
+APP=spoti-saver
+REPO=https://github.com/FEX592/spoti-saver
+DATA_HOME=${XDG_DATA_HOME:-${HOME:-.}/.local/share}
+INSTALL_DIR="$DATA_HOME/$APP"
 command_exists() { command -v "$1" >/dev/null 2>&1; }
-
-if [ ! -f "$APP_ENTRY" ]; then
-    fail "index.js was not found in: $SCRIPT_DIR"
-fi
-
-# Returns 0 for Termux, including launches where process.platform is Linux.
-is_termux() {
-    [ "${TERMUX_VERSION:-}" != "" ] ||
-    case "${PREFIX:-}" in
-        *com.termux*|/data/data/com.termux/*) return 0 ;;
-        *) return 1 ;;
+log() { printf '%s\n' "$*"; }
+fail() { printf 'Error: %s\n' "$*" >&2; return 1; }
+is_termux() { [ -n "${TERMUX_VERSION:-}" ] || case "${PREFIX:-}" in *com.termux*|/data/data/com.termux/*) return 0;; *) return 1;; esac; }
+os_family() { case "$(uname -s 2>/dev/null || echo unknown)" in Linux*) if is_termux; then echo termux; else echo linux; fi;; Darwin*) echo macos;; MINGW*|MSYS*|CYGWIN*) echo windows;; *) echo unsupported;; esac; }
+launcher_path() { if [ -n "${SPOTI_SAVER_BIN_DIR:-}" ]; then echo "$SPOTI_SAVER_BIN_DIR/spoti-saver"; return; fi; case "$(os_family)" in termux) echo "${PREFIX:-/data/data/com.termux/files/usr}/bin/spoti-saver";; windows) echo "${HOME:-.}/bin/spoti-saver";; *) if [ -w /usr/local/bin ] || command_exists sudo; then echo /usr/local/bin/spoti-saver; else echo "${HOME:-.}/.local/bin/spoti-saver"; fi;; esac; }
+fetch_latest() {
+    command_exists curl || { fail 'curl is required to download Spoti-Saver.'; return 1; }
+    command_exists tar || { fail 'tar is required to extract Spoti-Saver.'; return 1; }
+    archive=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || return 1
+    if ! curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 "$REPO/archive/refs/heads/main.tar.gz" -o "$archive"; then rm -f "$archive"; fail 'Download failed.'; return 1; fi
+    mkdir -p "$INSTALL_DIR" || { rm -f "$archive"; return 1; }
+    # Extract only into the dedicated application directory; config.json/.env and
+    # user data are not removed by updates.
+    tar -xzf "$archive" --strip-components=1 -C "$INSTALL_DIR" || { rm -f "$archive"; fail 'Could not extract the archive.'; return 1; }
+    rm -f "$archive"
+}
+ensure_node() {
+    command_exists node && command_exists npm && return 0
+    case "$(os_family)" in
+        termux) command_exists pkg || { fail 'Termux pkg was not found.'; return 1; }; pkg update -y && pkg install -y nodejs || return 1;;
+        macos) command_exists brew || { fail 'Install Homebrew, then rerun this installer.'; return 1; }; brew install node || return 1;;
+        windows)
+            if command_exists winget; then winget install --accept-source-agreements --accept-package-agreements -e --id OpenJS.NodeJS.LTS || return 1
+            elif command_exists choco; then choco install -y nodejs-lts || return 1
+            else fail 'Install Node.js LTS with winget or Chocolatey, then rerun.'; return 1; fi;;
+        linux)
+            if command_exists apt-get; then p=apt-get; elif command_exists dnf; then p=dnf; elif command_exists yum; then p=yum; elif command_exists pacman; then p=pacman; elif command_exists apk; then p=apk; else fail 'Install Node.js and npm using your system package manager.'; return 1; fi
+            case "$p" in
+                apt-get) if command_exists sudo; then sudo apt-get update && sudo apt-get install -y nodejs npm; else apt-get update && apt-get install -y nodejs npm; fi;;
+                dnf|yum) if command_exists sudo; then sudo "$p" install -y nodejs npm; else "$p" install -y nodejs npm; fi;;
+                pacman) if command_exists sudo; then sudo pacman -S --needed --noconfirm nodejs npm; else pacman -S --needed --noconfirm nodejs npm; fi;;
+                apk) if command_exists sudo; then sudo apk add nodejs npm; else apk add nodejs npm; fi;;
+            esac || return 1;;
+        *) fail 'Unsupported platform; install Node.js LTS and npm, then rerun.'; return 1;;
     esac
+    command_exists node && command_exists npm || { fail 'Node.js/npm are not available in PATH.'; return 1; }
 }
-
-# Detect the host family used by this shell. Git Bash/MSYS/Cygwin are treated
-# as Windows-compatible shells and use winget/Chocolatey when available.
-OS_FAMILY='unsupported'
-case "$(uname -s 2>/dev/null || printf unknown)" in
-    Linux*)
-        if is_termux; then OS_FAMILY='termux'
-        elif [ "${WSL_DISTRO_NAME:-}" != "" ] || [ "${WSL_INTEROP:-}" != "" ]; then OS_FAMILY='wsl'
-        elif grep -qi microsoft /proc/version 2>/dev/null; then OS_FAMILY='wsl'
-        else OS_FAMILY='linux'
-        fi
-        ;;
-    Darwin*) OS_FAMILY='macos' ;;
-    MINGW*|MSYS*|CYGWIN*) OS_FAMILY='windows' ;;
-    *) OS_FAMILY='unsupported' ;;
-esac
-
-launcher_path() {
-    if [ "$OS_FAMILY" = 'termux' ]; then
-        printf '%s\n' "${PREFIX:-/data/data/com.termux/files/usr}/bin/spoti-saver"
-    elif [ "$OS_FAMILY" = 'windows' ]; then
-        printf '%s\n' "${HOME:-.}/bin/spoti-saver"
-    elif [ -w /usr/local/bin ]; then
-        printf '%s\n' '/usr/local/bin/spoti-saver'
-    elif command_exists sudo; then
-        printf '%s\n' '/usr/local/bin/spoti-saver'
-    else
-        printf '%s\n' "${HOME:-.}/.local/bin/spoti-saver"
-    fi
-}
-
 write_launcher() {
-    destination="$1"
-    target="$SCRIPT_DIR/start.sh"
-    wrapper=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || fail 'Could not create a temporary launcher.'
-    {
-        printf '%s\n' '#!/bin/sh' '# spoti-saver managed launcher; do not edit.'
-        printf 'exec /bin/sh "%s/start.sh" "$@"\n' "$SCRIPT_DIR"
-    } > "$wrapper" || fail 'Could not write the launcher.'
-    chmod +x "$wrapper" || fail 'Could not make the launcher executable.'
-    if [ "$(dirname -- "$destination")" = '/usr/local/bin' ] && [ ! -w /usr/local/bin ]; then
-        command_exists sudo || fail 'Administrator permission is required to install /usr/local/bin/spoti-saver.'
-        sudo mkdir -p /usr/local/bin && sudo install -m 755 "$wrapper" "$destination" || fail 'Could not install the global launcher.'
-    else
-        mkdir -p "$(dirname -- "$destination")" || fail 'Could not create the launcher directory.'
-        install -m 755 "$wrapper" "$destination" || fail 'Could not install the global launcher.'
-    fi
-    rm -f "$wrapper"
+    dest=$1; dir=$(dirname "$dest")
+    tmp=$(mktemp "${TMPDIR:-/tmp}/spoti-saver.XXXXXX") || return 1
+    printf '#!/bin/sh\n# spoti-saver managed launcher\nexec /bin/sh "%s/start.sh" --run "$@"\n' "$INSTALL_DIR" > "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 755 "$tmp" || { rm -f "$tmp"; return 1; }
+    if [ "$dir" = /usr/local/bin ] && [ ! -w "$dir" ]; then
+        command_exists sudo || { rm -f "$tmp"; fail 'sudo is needed to install the global command.'; return 1; }
+        sudo mkdir -p "$dir" && sudo install -m 755 "$tmp" "$dest" || { rm -f "$tmp"; return 1; }
+    else mkdir -p "$dir" && install -m 755 "$tmp" "$dest" || { rm -f "$tmp"; return 1; }; fi
+    rm -f "$tmp"
+    case "$dest" in "${HOME:-/nonexistent}"/*) case ":${PATH:-}:" in *:"$dir":*) ;; *)
+        profile="${HOME:-}/.profile"; marker='# spoti-saver managed PATH entry'
+        if [ -n "${HOME:-}" ] && ! grep -Fqx "$marker" "$profile" 2>/dev/null; then printf '\n%s\nexport PATH="%s:$PATH"\n' "$marker" "$dir" >> "$profile" || return 1; fi
+        ;; esac;; esac
 }
-
-add_user_path() {
-    directory="$1"
-    case ":${PATH:-}:" in *:"$directory":*) return 0 ;; esac
-    profile="${HOME:-}/.profile"
-    [ -n "${HOME:-}" ] || return 0
-    marker='# spoti-saver adds its launcher directory'
-    if [ ! -f "$profile" ] || ! grep -Fqx "$marker" "$profile" 2>/dev/null; then
-        {
-            printf '\n%s\n' "$marker"
-            printf 'export PATH="%s:$PATH"\n' "$directory"
-        } >> "$profile" || fail "Could not update $profile. Add $directory to PATH manually."
-        log "✅ Added $directory to PATH for future terminal sessions."
+remove_launcher() {
+    dest=$(launcher_path)
+    if [ -f "$dest" ] && grep -q 'spoti-saver managed launcher' "$dest" 2>/dev/null; then
+        if [ "$(dirname "$dest")" = /usr/local/bin ] && [ ! -w /usr/local/bin ]; then sudo rm -f "$dest" || return 1; else rm -f "$dest" || return 1; fi
+        log "Removed managed launcher: $dest"
     fi
 }
-
-install_global_command() {
-    destination=$(launcher_path)
-    log "🔗 Installing global command: $destination"
-    write_launcher "$destination"
-    case "$destination" in
-        "$HOME"/*) add_user_path "$(dirname -- "$destination")" ;;
-    esac
-    log '✅ Global command installed. Open a new terminal, then type: spoti-saver'
+setup_app() {
+    [ -f "$INSTALL_DIR/index.js" ] || fetch_latest || return 1
+    ensure_node || return 1
+    if is_termux; then
+        command_exists pkg || { fail 'Termux pkg was not found.'; return 1; }
+        pkg install -y python ffmpeg || return 1
+        (cd "$INSTALL_DIR" && npm install --ignore-scripts) || return 1
+    else (cd "$INSTALL_DIR" && npm install) || return 1; fi
+    node "$INSTALL_DIR/bootstrap.js" --auto || return 1
+    write_launcher "$(launcher_path)" || return 1
+    log 'Installed/repaired successfully. Run: spoti-saver'
 }
-
-uninstall_global_command() {
-    destination=$(launcher_path)
-    if [ -f "$destination" ] && grep -q 'spoti-saver managed launcher' "$destination" 2>/dev/null; then
-        if [ "$(dirname -- "$destination")" = '/usr/local/bin' ] && [ ! -w /usr/local/bin ]; then sudo rm -f "$destination"; else rm -f "$destination"; fi
-        log "✅ Removed global command: $destination"
-    else
-        log "ℹ️ No Spoti-Saver-managed launcher found at: $destination"
+install_action() { fetch_latest && setup_app; }
+repair_action() {
+    if [ ! -f "$INSTALL_DIR/start.sh" ] || [ ! -f "$INSTALL_DIR/index.js" ] || [ ! -f "$INSTALL_DIR/bootstrap.js" ]; then
+        log 'Repairing missing application files from the latest release.'; fetch_latest || return 1
     fi
+    setup_app
 }
-
+update_action() { log 'Updating Spoti-Saver; user configuration and data are preserved.'; fetch_latest && setup_app; }
+uninstall_action() {
+    remove_launcher || return 1
+    if [ -d "$INSTALL_DIR" ]; then
+        [ "$INSTALL_DIR" = "$DATA_HOME/spoti-saver" ] || { fail 'Refusing to remove an unexpected path.'; return 1; }
+        rm -rf "$INSTALL_DIR" || return 1
+        log "Removed Spoti-Saver installation: $INSTALL_DIR"
+    else log 'Spoti-Saver installation directory not found.'; fi
+    log 'Files outside the dedicated installation directory were not touched.'
+}
+menu() {
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then fail 'Interactive menu needs a terminal. Run this command in an interactive shell.'; return 1; fi
+    exec 3<>/dev/tty
+    while :; do
+        printf '\nSpoti-Saver installer\n  1) Install\n  2) Uninstall\n  3) Repair\n  4) Update\n  0) Exit\nChoose an option: ' > /dev/tty
+        IFS= read -r choice <&3 || return 1
+        case "$choice" in 1) install_action || log 'Install failed.';; 2) uninstall_action || log 'Uninstall failed.';; 3) repair_action || log 'Repair failed.';; 4) update_action || log 'Update failed.';; 0|q|Q) log 'Goodbye.'; return 0;; *) log 'Choose 1, 2, 3, 4, or 0.';; esac
+    done
+}
+run_app() { [ -f "$INSTALL_DIR/index.js" ] || { fail 'Spoti-Saver is not installed. Run the installer and choose Install.'; return 1; }; ensure_node || return 1; exec node "$INSTALL_DIR/index.js" "$@"; }
 case "${1:-}" in
-    --install)
-        install_global_command
-        exit 0
-        ;;
-    --uninstall)
-        uninstall_global_command
-        exit 0
-        ;;
-    --help|-h)
-        log 'Usage: ./start.sh [--install|--uninstall|application arguments]'
-        log '  --install    Register the global spoti-saver terminal command.'
-        log '  --uninstall  Remove the managed global terminal command.'
-        exit 0
-        ;;
+    --run) shift; run_app "$@";;
+    --install) setup_app;;
+    --uninstall) uninstall_action;;
+    --repair) repair_action;;
+    --update) update_action;;
+    --help|-h) printf 'Usage: start.sh [--run [arguments] | --install | --uninstall | --repair | --update]\n';;
+    *)
+        # A remote curl|bash invocation has no project files. Install a copy,
+        # then show its menu; the menu itself reads from /dev/tty.
+        SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P || true)
+        if [ ! -f "${SELF_DIR:-}/index.js" ]; then
+            fetch_latest || exit 1
+            exec /bin/sh "$INSTALL_DIR/start.sh"
+        fi
+        menu;;
 esac
-
-install_node() {
-    case "$OS_FAMILY" in
-        termux)
-            command_exists pkg || fail 'Termux package manager (pkg) was not found. Install current Termux from F-Droid/GitHub and try again.'
-            log '📦 Installing Node.js with Termux pkg...'
-            pkg update -y || fail 'Termux package index update failed.'
-            pkg install -y nodejs || fail 'Node.js installation failed in Termux.'
-            ;;
-        macos)
-            command_exists brew || fail 'Node.js is missing. Install Homebrew from https://brew.sh, then run start.sh again.'
-            log '📦 Installing Node.js with Homebrew...'
-            brew install node || fail 'Node.js installation failed with Homebrew.'
-            ;;
-        windows)
-            if command_exists winget; then
-                log '📦 Installing Node.js with winget...'
-                winget install --accept-source-agreements --accept-package-agreements -e --id OpenJS.NodeJS.LTS || fail 'Node.js installation failed with winget.'
-            elif command_exists choco; then
-                log '📦 Installing Node.js with Chocolatey...'
-                choco install -y nodejs-lts || fail 'Node.js installation failed with Chocolatey.'
-            else
-                fail 'Node.js is missing. Install Node.js LTS with winget or Chocolatey, then run start.sh again.'
-            fi
-            ;;
-        linux|wsl)
-            if command_exists apt-get; then
-                log '📦 Installing Node.js with apt...'
-                if command_exists sudo; then sudo apt-get update && sudo apt-get install -y nodejs npm
-                else apt-get update && apt-get install -y nodejs npm
-                fi || fail 'Node.js installation failed with apt.'
-            elif command_exists dnf; then
-                log '📦 Installing Node.js with dnf...'
-                if command_exists sudo; then sudo dnf install -y nodejs npm
-                else dnf install -y nodejs npm
-                fi || fail 'Node.js installation failed with dnf.'
-            elif command_exists yum; then
-                log '📦 Installing Node.js with yum...'
-                if command_exists sudo; then sudo yum install -y nodejs npm
-                else yum install -y nodejs npm
-                fi || fail 'Node.js installation failed with yum.'
-            elif command_exists pacman; then
-                log '📦 Installing Node.js with pacman...'
-                if command_exists sudo; then sudo pacman -Sy --needed --noconfirm nodejs npm
-                else pacman -Sy --needed --noconfirm nodejs npm
-                fi || fail 'Node.js installation failed with pacman.'
-            elif command_exists apk; then
-                log '📦 Installing Node.js with apk...'
-                if command_exists sudo; then sudo apk add nodejs npm
-                else apk add nodejs npm
-                fi || fail 'Node.js installation failed with apk.'
-            else
-                fail 'Node.js is missing and no supported package manager was found. Install Node.js LTS from https://nodejs.org, then run start.sh again.'
-            fi
-            ;;
-        *)
-            fail 'Unsupported operating system. Install Node.js LTS from https://nodejs.org, then run start.sh again.'
-            ;;
-    esac
-}
-
-update_node() {
-    case "$OS_FAMILY" in
-        termux)
-            log '🔄 Checking Node.js updates with Termux pkg...'
-            pkg upgrade -y nodejs || fail 'Node.js update check failed in Termux.'
-            ;;
-        macos)
-            command_exists brew || fail 'Homebrew is unavailable, so Node.js cannot be updated automatically.'
-            log '🔄 Checking Node.js updates with Homebrew...'
-            brew update && brew upgrade node || fail 'Node.js update check failed with Homebrew.'
-            ;;
-        windows)
-            if command_exists winget; then
-                log '🔄 Checking Node.js updates with winget...'
-                winget upgrade --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements || true
-            elif command_exists choco; then
-                log '🔄 Checking Node.js updates with Chocolatey...'
-                choco upgrade -y nodejs-lts || fail 'Node.js update check failed with Chocolatey.'
-            else
-                log '⚠️ No supported Windows package manager found; leaving the installed Node.js unchanged.'
-            fi
-            ;;
-        linux|wsl)
-            # Package-manager update commands are deliberately scoped to Node.js;
-            # this script must not upgrade the whole operating system.
-            if command_exists apt-get; then
-                log '🔄 Checking Node.js updates with apt...'
-                if command_exists sudo; then sudo apt-get install --only-upgrade -y nodejs npm
-                else apt-get install --only-upgrade -y nodejs npm
-                fi || fail 'Node.js update check failed with apt.'
-            elif command_exists dnf; then
-                log '🔄 Checking Node.js updates with dnf...'
-                if command_exists sudo; then sudo dnf upgrade -y nodejs npm
-                else dnf upgrade -y nodejs npm
-                fi || fail 'Node.js update check failed with dnf.'
-            elif command_exists yum; then
-                log '🔄 Checking Node.js updates with yum...'
-                if command_exists sudo; then sudo yum update -y nodejs npm
-                else yum update -y nodejs npm
-                fi || fail 'Node.js update check failed with yum.'
-            elif command_exists pacman; then
-                log '🔄 Checking Node.js updates with pacman...'
-                if command_exists sudo; then sudo pacman -Syu --needed --noconfirm nodejs npm
-                else pacman -Syu --needed --noconfirm nodejs npm
-                fi || fail 'Node.js update check failed with pacman.'
-            elif command_exists apk; then
-                log '🔄 Checking Node.js updates with apk...'
-                if command_exists sudo; then sudo apk upgrade nodejs npm
-                else apk upgrade nodejs npm
-                fi || fail 'Node.js update check failed with apk.'
-            else
-                log '⚠️ No supported Linux package manager found; leaving Node.js unchanged.'
-            fi
-            ;;
-        *) log '⚠️ Automatic Node.js updates are unavailable for this operating system.' ;;
-    esac
-}
-
-if command_exists node; then
-    log "✅ Node.js found: $(command -v node)"
-    node --version || fail 'The installed node command could not be executed.'
-    update_node
-else
-    log 'ℹ️ Node.js was not found.'
-    install_node
-fi
-
-# Package managers may update PATH only for future shells. Refresh the common
-# native bin locations before checking again, without touching application setup.
-case "$OS_FAMILY" in
-    termux) export PATH="${PREFIX:-/data/data/com.termux/files/usr}/bin:$PATH" ;;
-    macos) [ -d /opt/homebrew/bin ] && export PATH="/opt/homebrew/bin:$PATH"; [ -d /usr/local/bin ] && export PATH="/usr/local/bin:$PATH" ;;
-esac
-
-command_exists node || fail 'Node.js installation completed, but node is still not available in PATH. Restart the terminal and run start.sh again.'
-log "🚀 Launching Spoti-Saver from: $SCRIPT_DIR"
-exec node "$APP_ENTRY" "$@"
