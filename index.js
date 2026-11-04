@@ -6,6 +6,7 @@ const readline = require('readline');
 const { execSync, spawn } = require('child_process');
 
 const ROOT = __dirname;
+const status = require('./lib/status');
 function paint(text, code, stream = process.stdout) {
     if (!stream.isTTY || process.env.NO_COLOR || process.env.TERM === 'dumb') return text;
     return `\x1b[${code}m${text}\x1b[0m`;
@@ -59,35 +60,20 @@ async function ensurePlatformTools() {
 }
 
 function runQuietly(command, options = {}, label = 'Working') {
-    return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
+    return status.withStatus(label, () => new Promise((resolve, reject) => {
         const child = spawn(command, [], { ...options, shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
         let stderr = '';
-        const interactive = !!process.stdout.isTTY;
-        const render = () => {
-            if (!interactive) return;
-            const seconds = Math.floor((Date.now() - startedAt) / 1000);
-            process.stdout.write(`\r\x1b[K${paint(label, 36)} | 0% | ${paint(`${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')} time elapsed`, 2)}`);
-        };
-        if (interactive) render(); else console.log(`${label} | 0%...`);
-        const timer = interactive ? setInterval(render, 1000) : null;
         child.stdout.on('data', data => { stdout += data; });
         child.stderr.on('data', data => { stderr += data; });
-        child.on('error', error => {
-            if (timer) clearInterval(timer);
-            if (interactive) process.stdout.write('\r\x1b[K');
-            reject(error);
-        });
+        child.on('error', reject);
         child.on('close', code => {
-            if (timer) clearInterval(timer);
-            if (interactive) process.stdout.write('\r\x1b[K');
             if (code === 0) return resolve();
             const output = [stdout, stderr].filter(Boolean).map(value => value.toString().trim()).filter(Boolean).join('\n');
-            if (output) console.error(output);
+            if (output) status.error(output);
             reject(new Error(`Setup command failed${code == null ? '' : ` (exit ${code})`}.`));
         });
-    });
+    }));
 }
 
 // ── Step 1: npm deps ─────────────────────────────────────────────────────
@@ -116,18 +102,7 @@ function elapsedClock(startedAt) {
     return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-async function withStatus(label, operation) {
-    if (!process.stdout.isTTY) {
-        console.log(`${label} | 0%...`);
-        return operation();
-    }
-    const startedAt = Date.now();
-    const render = () => process.stdout.write(`\r\x1b[K${paint(label, 36)} | 0% | ${paint(`${elapsedClock(startedAt)} time elapsed`, 2)}`);
-    render();
-    const timer = setInterval(render, 1000);
-    try { return await operation(); }
-    finally { clearInterval(timer); process.stdout.write('\r\x1b[K'); }
-}
+const withStatus = status.withStatus;
 
 const MAX_RETRIES = 3;
 

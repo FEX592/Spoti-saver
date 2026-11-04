@@ -8,6 +8,7 @@ const readline = require('readline');
 const { execFileSync, spawnSync } = require('child_process');
 const ROOT = __dirname;
 const CONFIG_PATH = path.join(ROOT, 'config.json');
+const status = require('./lib/status');
 
 if (process.env.PREFIX) {
     const termuxBin = path.join(process.env.PREFIX, 'bin');
@@ -47,10 +48,15 @@ function saveInstallTarget(platform, distro) {
     console.log(`\nSaved installation target in ${CONFIG_PATH}: ${platform}${distro ? ` (${distro})` : ''}`);
 }
 function run(command, args) {
-    console.log(`\n⏳ Setup running: ${command} ${args.join(' ')}`);
-    const result = spawnSync(command, args, { stdio: 'inherit', shell: false });
-    if (result.error || result.status !== 0) throw result.error || new Error(`${command} exited with code ${result.status}`);
-    console.log(`✅ Setup step complete: ${command}`);
+    return status.withStatusSync(`Running ${command}`, task => {
+        const result = spawnSync(command, args, { encoding: 'utf8', shell: false });
+        if (result.error || result.status !== 0) {
+            const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+            if (output) status.error(output);
+            throw result.error || new Error(`${command} exited with code ${result.status}`);
+        }
+        task.update('complete');
+    });
 }
 function sudo(command, args) { return commandExists('sudo') ? run('sudo', [command, ...args]) : run(command, args); }
 function detectLinuxFamily() {
@@ -142,7 +148,6 @@ function installFor(platform, distro) {
 }
 function installNodeDependencies() {
     if (!commandExists('npm')) throw new Error('Node.js/npm is required before setup can continue.');
-    console.log('⏳ Installing Node.js packages with npm. This can take several minutes; npm output will appear below.');
     run('npm', ['install', '--force', '--ignore-scripts', '--no-audit', '--no-fund']);
 }
 function verifyNodeDependencies() {
