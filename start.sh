@@ -95,7 +95,6 @@ remove_launcher() {
     dest=$(launcher_path)
     if [ -f "$dest" ] && grep -q 'spoti-saver managed launcher' "$dest" 2>/dev/null; then
         if [ "$(dirname "$dest")" = /usr/local/bin ] && [ ! -w /usr/local/bin ]; then sudo rm -f "$dest" || return 1; else rm -f "$dest" || return 1; fi
-        log "Removed managed launcher: $dest"
     fi
 }
 setup_app() {
@@ -124,13 +123,14 @@ repair_action() {
 }
 update_action() { log 'Updating Spoti-Saver; user configuration and data are preserved.'; fetch_latest && setup_app; }
 uninstall_action() {
+    uninstall_started=$(date +%s)
     remove_launcher || return 1
     if [ -d "$INSTALL_DIR" ]; then
         [ "$INSTALL_DIR" = "$DATA_HOME/spoti-saver" ] || { fail 'Refusing to remove an unexpected path.'; return 1; }
         rm -rf "$INSTALL_DIR" || return 1
-        log "Removed Spoti-Saver installation: $INSTALL_DIR"
-    else log 'Spoti-Saver installation directory not found.'; fi
-    log 'Files outside the dedicated installation directory were not touched.'
+    fi
+    uninstall_elapsed=$(($(date +%s) - uninstall_started))
+    success "Uninstalling Spoti-Saver | 100% | $(printf '%02d:%02d' "$((uninstall_elapsed / 60))" "$((uninstall_elapsed % 60))") time elapsed"
 }
 menu() {
     if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then fail 'Interactive menu needs a terminal. Run this command in an interactive shell.'; return 1; fi
