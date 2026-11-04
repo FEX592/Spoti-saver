@@ -22,19 +22,11 @@ run_status() {
     "$@" >"$status_log" 2>&1 &
     status_pid=$!
     status_started=$(date +%s)
-    if [ -t 1 ]; then
-        while kill -0 "$status_pid" 2>/dev/null; do
-            status_elapsed=$(($(date +%s) - status_started))
-            if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-                printf '\r\033[K\033[36m%s\033[0m | 0%% | \033[2m%02d:%02d time elapsed\033[0m' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
-            else printf '\r\033[K%s | 0%% | %02d:%02d time elapsed' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
-            sleep 1
-        done
-    else
-        log "$status_label | 0%..."
-    fi
     wait "$status_pid"; status_result=$?
-    if [ -t 1 ]; then printf '\r\033[K'; fi
+    status_elapsed=$(($(date +%s) - status_started))
+    if [ "$status_result" -eq 0 ]; then
+        success "$status_label | 100% | $(printf '%02d:%02d' "$((status_elapsed / 60))" "$((status_elapsed % 60))") time elapsed"
+    fi
     if [ "$status_result" -ne 0 ]; then cat "$status_log" >&2; return "$status_result"; fi
 }
 is_termux() { [ -n "${TERMUX_VERSION:-}" ] || case "${PREFIX:-}" in *com.termux*|/data/data/com.termux/*) return 0;; *) return 1;; esac; }
