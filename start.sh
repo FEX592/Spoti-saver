@@ -8,7 +8,15 @@ DATA_HOME=${XDG_DATA_HOME:-${HOME:-.}/.local/share}
 INSTALL_DIR="$DATA_HOME/$APP"
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 log() { printf '%s\n' "$*"; }
-fail() { printf 'Error: %s\n' "$*" >&2; return 1; }
+fail() {
+    if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then printf '\033[31mError:\033[0m %s\n' "$*" >&2
+    else printf 'Error: %s\n' "$*" >&2; fi
+    return 1
+}
+success() {
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then printf '\033[32m%s\033[0m\n' "$*"
+    else log "$*"; fi
+}
 run_status() {
     status_label=$1; status_log=$2; shift 2
     "$@" >"$status_log" 2>&1 &
@@ -17,7 +25,9 @@ run_status() {
     if [ -t 1 ]; then
         while kill -0 "$status_pid" 2>/dev/null; do
             status_elapsed=$(($(date +%s) - status_started))
-            printf '\r\033[K%s | elapsed %02d:%02d' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+            if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+                printf '\r\033[K\033[36m%s\033[0m | \033[2melapsed %02d:%02d\033[0m' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"
+            else printf '\r\033[K%s | elapsed %02d:%02d' "$status_label" "$((status_elapsed / 60))" "$((status_elapsed % 60))"; fi
             sleep 1
         done
     else
@@ -103,7 +113,7 @@ setup_app() {
     fi
     rm -f "$setup_log"
     write_launcher "$(launcher_path)" || return 1
-    log 'Installed/repaired successfully. Run: spoti-saver'
+    success 'Installed/repaired successfully. Run: spoti-saver'
 }
 install_action() { fetch_latest && setup_app; }
 repair_action() {

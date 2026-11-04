@@ -6,6 +6,10 @@ const readline = require('readline');
 const { execSync, spawn } = require('child_process');
 
 const ROOT = __dirname;
+function paint(text, code, stream = process.stdout) {
+    if (!stream.isTTY || process.env.NO_COLOR || process.env.TERM === 'dumb') return text;
+    return `\x1b[${code}m${text}\x1b[0m`;
+}
 
 // Termux normally sets this, but launchers, file managers, and some shells can
 // start Node without exporting $PREFIX/bin. Put the native package directory
@@ -64,7 +68,7 @@ function runQuietly(command, options = {}, label = 'Working') {
         const render = () => {
             if (!interactive) return;
             const seconds = Math.floor((Date.now() - startedAt) / 1000);
-            process.stdout.write(`\r\x1b[K${label} | elapsed ${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`);
+            process.stdout.write(`\r\x1b[K${paint(label, 36)} | ${paint(`elapsed ${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`, 2)}`);
         };
         if (interactive) render(); else console.log(`${label}...`);
         const timer = interactive ? setInterval(render, 1000) : null;
@@ -118,7 +122,7 @@ async function withStatus(label, operation) {
         return operation();
     }
     const startedAt = Date.now();
-    const render = () => process.stdout.write(`\r\x1b[K${label} | elapsed ${elapsedClock(startedAt)}`);
+    const render = () => process.stdout.write(`\r\x1b[K${paint(label, 36)} | ${paint(`elapsed ${elapsedClock(startedAt)}`, 2)}`);
     render();
     const timer = setInterval(render, 1000);
     try { return await operation(); }
@@ -231,7 +235,7 @@ async function downloadSingleTrack(ytdlpPath, ffmpegPath, meta, destFolder) {
 
     await tagFile(finalPath, meta);
 
-    console.log(`Saved: ${filenameBase}.mp3`);
+    console.log(`${paint('Saved:', 32)} ${filenameBase}.mp3`);
     return finalPath;
 }
 
@@ -244,19 +248,19 @@ async function downloadCollection(resolved, ytdlpPath, ffmpegPath, baseDir) {
             return spotify.getPlaylist(resolved.id);
         }, 'Spotify collection lookup'));
     } catch (err) {
-        console.error('❌ Could not resolve playlist:', err.message, '\n');
+        console.error(paint('❌ Could not resolve playlist:', 31, process.stderr), err.message, '\n');
         return;
     }
 
     if (!collection.tracks.length) {
-        console.error(`❌ No tracks came back for this ${resolved.type}. Spotify may not have exposed its public track list.`);
+        console.error(paint(`❌ No tracks came back for this ${resolved.type}. Spotify may not have exposed its public track list.`, 31, process.stderr));
         console.error('   Try opening the page publicly, or paste individual track links instead.\n');
         return;
     }
 
     const collectionFolder = ensureDir(path.join(baseDir, sanitizeFilename(collection.name)));
     const collectionLabel = resolved.type[0].toUpperCase() + resolved.type.slice(1);
-    console.log(`\n📀 ${collectionLabel}: ${collection.name} — ${collection.tracks.length} tracks`);
+    console.log(`\n${paint(`📀 ${collectionLabel}:`, 36)} ${collection.name} — ${collection.tracks.length} tracks`);
     const total = collection.tracks.length;
     const failures = [];
     for (let i = 0; i < total; i++) {
@@ -264,13 +268,13 @@ async function downloadCollection(resolved, ytdlpPath, ffmpegPath, baseDir) {
         try {
             await downloadSingleTrack(ytdlpPath, ffmpegPath, meta, collectionFolder);
         } catch (err) {
-            console.error(`   ❌ failed: ${err.message}`);
+            console.error(paint(`   ❌ failed: ${err.message}`, 31, process.stderr));
             failures.push(`${meta.artist} - ${meta.title}`);
         }
     }
 
     if (failures.length) {
-        console.error(`❌ Failed tracks:\n   - ${failures.join('\n   - ')}`);
+        console.error(paint(`❌ Failed tracks:\n   - ${failures.join('\n   - ')}`, 31, process.stderr));
     }
     console.log(`\n🎉 Done. ${total - failures.length}/${total} tracks saved to "${collection.name}".`);
 }
@@ -280,14 +284,14 @@ async function downloadTrack(link, ytdlpPath, ffmpegPath, baseDir) {
     try {
         meta = await withStatus('Looking up Spotify track', () => withRetries(() => spotify.getTrackMetadata(link), 'Spotify track lookup'));
     } catch (err) {
-        console.error('❌ Could not resolve track metadata:', err.message, '\n');
+        console.error(paint('❌ Could not resolve track metadata:', 31, process.stderr), err.message, '\n');
         return;
     }
 
     try {
         await downloadSingleTrack(ytdlpPath, ffmpegPath, meta, baseDir);
     } catch (err) {
-        console.error('❌ Download failed:', err.message, '\n');
+        console.error(paint('❌ Download failed:', 31, process.stderr), err.message, '\n');
         return;
     }
 }
@@ -298,7 +302,7 @@ async function downloadTrack(link, ytdlpPath, ffmpegPath, baseDir) {
 async function processLink(link, ytdlpPath, ffmpegPath, baseDir) {
     const resolved = spotify.resolveLink(link);
     if (!resolved) {
-        console.error(`❌ Not a Spotify track, playlist, artist, or album link, skipping: ${link}\n`);
+        console.error(paint(`❌ Not a Spotify track, playlist, artist, or album link, skipping: ${link}`, 31, process.stderr));
         return;
     }
     if (resolved.type === 'playlist' || resolved.type === 'artist' || resolved.type === 'album') {
@@ -336,7 +340,7 @@ async function main() {
     let baseDir = config.getOutputPath(outDir);
     ensureDir(baseDir);
 
-    console.log(`Ready — saving to ${baseDir}. Paste a Spotify link, or type 'exit' to stop.`);
+    console.log(`${paint('Ready', 32)} — saving to ${baseDir}. Paste a Spotify link, or type 'exit' to stop.`);
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
 
@@ -407,6 +411,6 @@ async function initialize() {
 }
 
 initialize().catch(err => {
-    console.error('❌ Unexpected error:', err.message);
+    console.error(paint('❌ Unexpected error:', 31, process.stderr), err.message);
     process.exit(1);
 });
